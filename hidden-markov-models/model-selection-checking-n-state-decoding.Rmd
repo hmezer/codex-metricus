@@ -1,0 +1,245 @@
+---
+title: "Model Selection, Checking & State Decoding"
+author: "hmezer"
+date: "2025-07-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We consider a time series giving the step lengths of the female elephant Habiba in the package `moveHMM`.
+
+```{r}
+install.packages("moveHMM")
+library(moveHMM)
+```
+
+```{r}
+rawdata <- read.table("http://www.rolandlangrock.com/HMMs/elephant_rawdata.txt",
+header=T)
+head(rawdata)
+```
+
+```{r}
+data <- prepData(rawdata, type="UTM", coordNames=c("x","y"))
+head(data)
+```
+
+To determine the number of states and candidate parameters for the initial distribution, we consult the histogram:
+
+```{r}
+plot(data$step)
+```
+
+```{r}
+hist(data$step, breaks=100)
+```
+
+We fit a 2-state model:
+
+```{r}
+stepMean2 <- c(25, 100) # mean vector of gamma distribution (step lengths)
+stepSD2 <- c(10, 30) # SD vector of gamma distribution (step lengths)
+stepPar2 <- c(stepMean2, stepSD2)
+mod2 <- fitHMM(data,
+               nbStates=2,
+               stepPar0=stepPar2,
+               verbose=1,
+               angleDist="none",
+               stationary=T)
+```
+
+We fit a 3-state model:
+
+```{r}
+stepMean3 <- c(5, 50, 150) # mean vector of gamma distribution (step lengths)
+stepSD3 <- c(5, 10, 50) # SD vector of gamma distribution (step lengths)
+stepPar3 <- c(stepMean3, stepSD3)
+mod3 <- fitHMM(data,
+               nbStates=3,
+               stepPar0=stepPar3,
+               verbose=1,
+               angleDist="none",
+               stationary=T)
+```
+
+Finally, we fit a 4-state HMM:
+
+```{r}
+stepMean4 <- c(5, 30, 100, 300) # mean vector of gamma distribution (step lengths)
+stepSD4 <- c(5, 10, 25, 150) # SD vector of gamma distribution (step lengths)
+stepPar4 <- c(stepMean4, stepSD4)
+mod4 <- fitHMM(data,
+               nbStates=4,
+               stepPar0=stepPar4,
+               verbose=1,
+               angleDist="none",
+               stationary=T)
+```
+
+Which model is the best fit among these three? We can utilize the information criteria to guide us:
+
+```{r}
+# AIC
+aic <- numeric(3)
+aic[1] <- 2*mod2$mod$minimum + 2*length(mod2$mod$estimate)
+aic[2] <- 2*mod3$mod$minimum + 2*length(mod3$mod$estimate)
+aic[3] <- 2*mod4$mod$minimum + 2*length(mod4$mod$estimate)
+aic
+which.min(aic)
+```
+
+```{r}
+# BIC
+bic <- numeric(3)
+T <- dim(data)[1]
+bic[1] <- 2*mod2$mod$minimum + log(T)*length(mod2$mod$estimate)
+bic[2] <- 2*mod3$mod$minimum + log(T)*length(mod3$mod$estimate)
+bic[3] <- 2*mod4$mod$minimum + log(T)*length(mod4$mod$estimate)
+bic
+which.min(bic)
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(2:4,aic,type='b',main='AIC values',xlab='number of states N',ylab='AIC')
+plot(2:4,bic,type='b',main='BIC values',xlab='number of states N',ylab='BIC')
+```
+
+```{r}
+mod2$mle
+mod3$mle
+mod4$mle
+```
+
+When we observe the states, especially in the 4-state setting, it is apparent that the states rather "mop up" the structure.
+
+Now, considering this set of candidate models for the data set we have, how could we select the best one? What criteria to utilize besides the information criteria? Let's plot the marginal distribution of the states to see how well they fir to empirical distributions:
+
+```{r}
+plot(mod2, breaks=60)
+```
+
+```{r}
+plot(mod3, breaks=60)
+```
+
+```{r}
+plot(mod4, breaks=60)
+```
+
+
+
+```{r}
+mu = as.vector(mod3$mle$stepPar[1,])
+sigma = as.vector(mod3$mle$stepPar[2,])
+delta = as.vector(mod3$mle$delta)
+par(mfrow=c(1,1))
+hist(data$step,probability=TRUE,breaks=60,col="light grey",xlab="step length in metres",main="Marginal distribution vs. empirical distribution")
+z <- seq(0,1200,by=0.1)
+lines(z,
+      (delta[1]*dgamma(z,shape=mu[1]^2/sigma[1]^2,scale=sigma[1]^2/mu[1])
+      + delta[2]*dgamma(z,shape=mu[2]^2/sigma[2]^2,scale=sigma[2]^2/mu[2])
+      + delta[3]*dgamma(z,shape=mu[3]^2/sigma[3]^2,scale=sigma[3]^2/mu[3])),
+      col='red',lwd=2)
+```
+
+Now we move on to the residual checking for the model fit:
+
+```{r}
+pr2 <- pseudoRes(mod2)
+pr3 <- pseudoRes(mod3)
+pr4 <- pseudoRes(mod4)
+```
+
+```{r}
+# Plot the residuals for the first series (e.g., pr2)
+plot(pr2$stepRes, ylab = "pseudo-residuals", main = "Pseudo-Residuals for HMMs",
+     col = "blue", pch = 20)
+
+# Add a horizontal line at y=0
+abline(h = 0, lty = 2, col = "grey")
+
+# Add the residuals for the second series (pr3) in a different color
+points(pr3$stepRes, col = "red", pch = 20)
+
+# Add the residuals for the third series (pr4)
+points(pr4$stepRes, col = "green", pch = 20)
+
+# Add a legend to distinguish the series
+legend("topleft", legend = c("2 states", "3 states", "4 states"),
+       col = c("blue", "red", "green"), pch = 20, title = "HMM")
+```
+
+```{r}
+# Define semi-transparent colors
+blue_alpha <- rgb(0, 0, 255, 100, maxColorValue = 255)
+red_alpha <- rgb(255, 0, 0, 100, maxColorValue = 255)
+green_alpha <- rgb(0, 255, 0, 100, maxColorValue = 255)
+
+# Plot the residuals for the first series (pr2) using open circles
+plot(pr2$stepRes, ylab = "pseudo-residuals", main = "Pseudo-Residuals for HMMs",
+     col = blue_alpha, pch = 1)
+
+# Add a horizontal line at y=0
+abline(h = 0, lty = 2, col = "grey")
+
+# Add the residuals for the second series (pr3) with open circles
+points(pr3$stepRes, col = red_alpha, pch = 1)
+
+# Add the residuals for the third series (pr4) with open circles
+points(pr4$stepRes, col = green_alpha, pch = 1)
+
+# Add a legend with open circles
+legend("topleft", legend = c("2 states", "3 states", "4 states"),
+       col = c(blue_alpha, red_alpha, green_alpha), pch = 1, title = "HMM")
+```
+
+Now, after checking out these things, and that we are content with our choice of the model with 3-states. We move on to state decoding.
+
+But there is a catch with it! There are two kinds of state decoding, namely, global and local. In local state decoding, we are asking our algorithm to point out what is the most likely state at each individual point t. And for global state decoding, we are asking the respective algorithm of ours which path is the most likely one that could occur. So instead of checking our ass at each step, we are gazing into the horizon and trying to point out which road to follow.
+
+They can be both good and bad, depending on what we expect from them. Local decoding could possible miss the temporal structure and as if 'overfit' to data. But it is quite precise in decoding what is going on at each point, regardless of the neighboring activity. Zig-zagging due to that is inevitable.
+
+Meanwhile, global decoding rather smooths out the state transition process, possibly ignoring local anomalies, so as to be blind to these.
+
+```{r}
+sp3 <- stateProbs(mod3)
+round(sp3[1:50,],3)
+```
+
+```{r}
+matplot(sp3[1:50,], type = "l", lty = 1, lwd = 2,
+        col = c("blue", "red", "darkgreen"),
+        xlab = "Time", ylab = "State Probability",
+        main = "Posterior State Probabilities")
+legend("topright", legend = c("State 1", "State 2", "State 3"),
+       col = c("blue", "red", "darkgreen"), lty = 1, lwd = 2)
+```
+
+We observe here that the probabilities are mostly gradually rising and falling, making it indeed hard to determine the most probable sequence of states.
+
+I wonder, what difference would we observe for the first 50 values if we check the 4-state model. Let's PLOT!
+
+```{r}
+sp4 <- stateProbs(mod4)
+round(sp4[1:50,],3)
+```
+
+```{r}
+matplot(sp4[1:50,], type = "l", lty = 1, lwd = 2,
+        col = c("blue", "red", "darkgreen", "purple"),
+        xlab = "Time", ylab = "State Probability",
+        main = "Posterior State Probabilities")
+legend("topright", legend = c("State 1", "State 2", "State 3", "State 4"),
+       col = c("blue", "red", "darkgreen", "purple"), lty = 1, lwd = 2)
+```
+
+From the visual examination, the most we can claim is that 4-state setting makes the state probabilities act more wiggly and less apparent. At least, it can be claimed that the state probabilities seem unsure and rather noisy.
+
+```{r}
+plotStates(mod3)
+```
+
